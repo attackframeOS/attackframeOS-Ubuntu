@@ -82,7 +82,7 @@ At boot, AttackFrame puts Docker's storage on a partition labelled `AF-DOCKER` w
 From the live session:
 
 ```bash
-sudo attackframe-install /dev/nvme0n1 --user coenraad
+sudo attackframe-install /dev/sda --user ghost
 ```
 
 Wipes the disk (GPT: BIOS-boot + 512 MiB EFI + ext4 root), copies the live system including the baked Kali/BlackArch images, creates your user and installs GRUB for both UEFI and legacy BIOS. UEFI boot works with Secure Boot on (Ubuntu's signed shim, GRUB and kernel), for both the ISO and the installed system. Your user is added to the `docker` group so the boxes and app-grid launchers work without a password prompt. Membership of `docker` is root-equivalent; add `--no-docker-group` to leave it out, in which case the boxes run through sudo.
