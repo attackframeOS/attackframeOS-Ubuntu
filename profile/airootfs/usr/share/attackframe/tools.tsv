@@ -1,0 +1,69 @@
+# id	category	layer	mode	command	name	description
+# layer: preferred box (kali|blackarch); the other box is used when the preferred one lacks the tool
+# mode: gui = launch directly, cli = open in AttackFrame terminal with the command's help, then a shell
+nmap	Recon	kali	cli	nmap	Nmap	Network mapper and port scanner
+masscan	Recon	kali	cli	masscan	Masscan	Internet-scale async port scanner
+rustscan	Recon	blackarch	cli	rustscan	RustScan	Fast port discovery feeding nmap
+amass	Recon	kali	cli	amass	Amass	Attack-surface and subdomain mapping
+subfinder	Recon	kali	cli	subfinder	Subfinder	Passive subdomain discovery
+dnsrecon	Recon	kali	cli	dnsrecon	DNSRecon	DNS enumeration
+theharvester	Recon	kali	cli	theHarvester	theHarvester	Emails, hosts and names from OSINT
+whatweb	Recon	kali	cli	whatweb	WhatWeb	Web technology fingerprinting
+enum4linux-ng	Recon	kali	cli	enum4linux-ng	enum4linux-ng	SMB / Windows enumeration
+netdiscover	Recon	kali	cli	netdiscover	Netdiscover	ARP host discovery
+burpsuite	Web	kali	gui	burpsuite	Burp Suite	Web proxy and testing platform
+zaproxy	Web	kali	gui	zaproxy	ZAP	OWASP web app scanner
+sqlmap	Web	kali	cli	sqlmap	sqlmap	SQL injection automation
+nikto	Web	kali	cli	nikto	Nikto	Web server scanner
+gobuster	Web	kali	cli	gobuster	Gobuster	Directory / DNS / vhost brute force
+ffuf	Web	kali	cli	ffuf	ffuf	Fast web fuzzer
+feroxbuster	Web	kali	cli	feroxbuster	Feroxbuster	Recursive content discovery
+wpscan	Web	kali	cli	wpscan	WPScan	WordPress scanner
+nuclei	Web	kali	cli	nuclei	Nuclei	Template-based vuln scanner
+metasploit	Exploit	kali	cli	msfconsole	Metasploit	Exploitation framework console
+searchsploit	Exploit	kali	cli	searchsploit	SearchSploit	Offline Exploit-DB search
+john	Crack	kali	cli	john	John the Ripper	Password cracker
+hashcat	Crack	kali	cli	hashcat	Hashcat	GPU password recovery
+hydra	Crack	kali	cli	hydra	Hydra	Online login brute force
+crunch	Crack	kali	cli	crunch	Crunch	Wordlist generator
+cewl	Crack	kali	cli	cewl	CeWL	Wordlists from websites
+hashid	Crack	kali	cli	hashid	hashID	Hash type identifier
+aircrack-ng	Wireless	kali	cli	aircrack-ng	Aircrack-ng	Wi-Fi auditing suite
+wifite	Wireless	kali	cli	wifite	Wifite	Automated wireless auditing
+kismet	Wireless	kali	cli	kismet	Kismet	Wireless sniffer and IDS
+hcxdumptool	Wireless	kali	cli	hcxdumptool	hcxdumptool	PMKID / handshake capture
+wireshark	Sniff	kali	gui	wireshark	Wireshark	Packet analyzer
+tcpdump	Sniff	kali	cli	tcpdump	tcpdump	CLI packet capture
+bettercap	Sniff	kali	cli	bettercap	Bettercap	Network attack and MITM framework
+responder	Sniff	kali	cli	responder	Responder	LLMNR / NBT-NS poisoner
+mitmproxy	Sniff	kali	cli	mitmproxy	mitmproxy	Interactive HTTPS proxy
+ettercap	Sniff	kali	gui	ettercap -G	Ettercap	MITM suite
+netexec	AD	kali	cli	nxc	NetExec	Network service exploitation (ex-CME)
+impacket	AD	kali	cli	impacket-secretsdump	Impacket	Windows protocol toolkit
+evil-winrm	AD	kali	cli	evil-winrm	Evil-WinRM	WinRM shell
+bloodhound	AD	kali	gui	bloodhound	BloodHound	AD attack-path graphing
+kerbrute	AD	blackarch	cli	kerbrute	Kerbrute	Kerberos user enum / spraying
+certipy	AD	kali	cli	certipy	Certipy	AD CS abuse
+ghidra	Reverse	kali	gui	ghidra	Ghidra	Reverse-engineering suite
+radare2	Reverse	kali	cli	r2	radare2	RE framework
+gdb	Reverse	kali	cli	gdb	GDB	Debugger (pwndbg when installed)
+binwalk	Reverse	kali	cli	binwalk	Binwalk	Firmware analysis
+jadx	Reverse	kali	gui	jadx-gui	JADX	Android DEX decompiler
+volatility3	Forensics	kali	cli	vol	Volatility 3	Memory forensics
+sleuthkit	Forensics	kali	cli	fls	Sleuth Kit	Disk image forensics
+foremost	Forensics	kali	cli	foremost	Foremost	File carving
+exiftool	Forensics	kali	cli	exiftool	ExifTool	Metadata reader / writer
+proxychains	Pivot	kali	cli	proxychains	ProxyChains	Route tools through proxies
+chisel	Pivot	blackarch	cli	chisel	Chisel	TCP/UDP tunnel over HTTP
+ligolo-ng	Pivot	blackarch	cli	ligolo-proxy	Ligolo-ng	Tunnel-based pivoting
+socat	Pivot	kali	cli	socat	socat	Multipurpose relay
+katana	Recon	blackarch	cli	katana	Katana	Next-gen crawling and spidering
+naabu	Recon	blackarch	cli	naabu	Naabu	Fast SYN/CONNECT port scanner
+dalfox	Web	blackarch	cli	dalfox	Dalfox	XSS scanner and parameter analysis
+arjun	Web	blackarch	cli	arjun	Arjun	HTTP parameter discovery
+trufflehog	Recon	blackarch	cli	trufflehog	TruffleHog	Secret scanning in repos and files
+coercer	AD	blackarch	cli	coercer	Coercer	Coerce Windows auth via MS-RPC
+rizin	Reverse	blackarch	cli	rizin	Rizin	RE framework (radare2 fork)
+sliver	Pivot	blackarch	cli	sliver-server	Sliver	Adversary emulation / C2 framework
+kali-shell	Pivot	kali	cli	kali	Kali Shell	Shell inside the Kali tool layer
+blackarch-shell	Pivot	blackarch	cli	blackarch	BlackArch Shell	Shell inside the BlackArch tool layer

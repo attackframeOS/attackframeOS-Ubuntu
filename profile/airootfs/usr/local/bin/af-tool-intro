@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Header + usage for a tool opened from the app grid.
+bin=${1:?tool}
+C=$'\e[38;2;0;240;255m'; M=$'\e[38;2;255;43;214m'; D=$'\e[38;2;90;110;140m'; R=$'\e[0m'
+path=$(command -v "$bin")
+src=native
+[[ -f $path ]] && src=$(sed -n 's/^# attackframe-shim: //p' "$path" | head -1)
+printf '%s┌─[ %s%s%s ]%s\n' "$C" "$M" "${bin^^}" "$C" "$R"
+printf '%s└──╼ %s %s(%s)%s\n\n' "$C" "$path" "$D" "${src:-native}" "$R"
+case $bin in
+  kali|blackarch) exec "$bin" ;;
+  msfconsole|r2|rizin|gdb|vol|mitmproxy|bettercap|sliver-server) printf '%stype %s%s%s to start%s\n' "$D" "$M" "$bin" "$D" "$R" ;;
+  *) { "$bin" --help 2>&1 || "$bin" -h 2>&1; } | head -n 40 ;;
+esac
+tgt=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/attackframe/target" 2>/dev/null)
+printf '\n%s[ %s --help  |  target: %s  |  set one with: target <ip>  |  root: sudo %s ]%s\n' "$D" "$bin" "${tgt:-none}" "$bin" "$R"

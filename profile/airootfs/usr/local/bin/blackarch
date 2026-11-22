@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# blackarch <cmd...>  — run a command from the BlackArch layer. No args: open a BlackArch shell.
+if (($#)); then exec attackframe-box blackarch run "$@"; else exec attackframe-box blackarch enter; fi

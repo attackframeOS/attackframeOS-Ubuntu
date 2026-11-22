@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# attackframe-blackarch — manage the BlackArch tool layer (see: attackframe-blackarch help)
+exec /usr/local/bin/attackframe-box blackarch "$@"

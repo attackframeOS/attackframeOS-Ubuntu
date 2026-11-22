@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# attackframe-install — install AttackFrame OS from the live session to a disk.
+#
+#   sudo attackframe-install /dev/nvme0n1 [--user NAME] [--hostname NAME] [--no-docker-group] [--yes]
+#
+# Copies the live image (Ubuntu + GNOME + the baked Kali/BlackArch layer images)
+# onto the disk and makes it bootable on both UEFI and legacy BIOS.
+# The WHOLE disk is wiped: GPT with BIOS-boot (1 MiB), EFI (512 MiB) and an ext4 root.
+set -euo pipefail
+
+C=$'\e[38;2;0;240;255m'; M=$'\e[38;2;255;43;214m'; Y=$'\e[38;2;245;255;59m'; R=$'\e[0m'
+say()  { printf '%s[AF]%s %s\n' "$C" "$R" "$*"; }
+warn() { printf '%s[AF:warn]%s %s\n' "$Y" "$R" "$*" >&2; }
+die()  { printf '%s[AF:error]%s %s\n' "$M" "$R" "$*" >&2; exit 1; }
+
+DISK="" USERNAME="" HOSTNAME_NEW=attackframe DOCKER_GROUP=1 YES=0
+while (($#)); do
+  case $1 in
+    --user) USERNAME=${2:?}; shift 2 ;;
+    --hostname) HOSTNAME_NEW=${2:?}; shift 2 ;;
+    --no-docker-group|--strict-sudo) DOCKER_GROUP=0; shift ;;
+    --yes|-y) YES=1; shift ;;
+    -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    /dev/*) DISK=$1; shift ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+((EUID == 0)) || die "run as root: sudo attackframe-install /dev/sdX"
+[[ -n $DISK ]] || { lsblk -d -o NAME,SIZE,MODEL,TRAN | sed 's/^/  /'; die "which disk? e.g. sudo attackframe-install /dev/sda"; }
+[[ -b $DISK ]] || die "$DISK is not a block device"
+
+SQUASH=""
+for f in /cdrom/casper/filesystem.squashfs /run/casper/medium/casper/filesystem.squashfs /media/cdrom/casper/filesystem.squashfs; do
+  [[ -f $f ]] && { SQUASH=$f; break; }
+done
+[[ -n $SQUASH ]] || SQUASH=$(find /cdrom /run /media -maxdepth 4 -name filesystem.squashfs -path '*casper*' 2>/dev/null | head -1)
+[[ -f $SQUASH ]] || die "live image (casper/filesystem.squashfs) not found — run this from the AttackFrame live ISO"
+src=$(findmnt -no SOURCE /cdrom 2>/dev/null || true)
+if [[ -n $src ]] && { [[ $src == "$DISK" ]] || [[ /dev/$(lsblk -no PKNAME "$src" 2>/dev/null | head -1) == "$DISK" ]]; }; then
+  die "$DISK holds the live medium"
+fi
+
+if [[ -z $USERNAME ]]; then read -rp "username for the new system [operator]: " USERNAME; USERNAME=${USERNAME:-operator}; fi
+[[ $USERNAME =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid username: $USERNAME"
+while :; do
+  read -rsp "password for $USERNAME: " PW1; echo
+  read -rsp "again: " PW2; echo
+  [[ -n $PW1 && $PW1 == "$PW2" ]] && break
+  warn "passwords empty or different, try again"
+done
+
+UEFI=0; [[ -d /sys/firmware/efi ]] && UEFI=1
+lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$DISK"
+echo
+echo "${M}ALL DATA ON $DISK WILL BE DESTROYED.${R}  boot: $( ((UEFI)) && echo UEFI || echo BIOS ) (both are installed)"
+if ((!YES)); then read -rp "type the disk name ($DISK) to continue: " ok; [[ $ok == "$DISK" ]] || die "aborted"; fi
+
+T=/target
+part() { [[ $DISK =~ [0-9]$ ]] && echo "${DISK}p$1" || echo "${DISK}$1"; }
+cleanup() {
+  for m in "$T/boot/efi" "$T/dev/pts" "$T/dev" "$T/proc" "$T/sys/firmware/efi/efivars" "$T/sys" "$T/run" "$T"; do
+    mountpoint -q "$m" 2>/dev/null && umount -lf "$m" || true
+  done
+}
+trap cleanup EXIT
+
+# ------------------------------------------------------------------ disk
+say "partitioning $DISK"
+swapoff -a 2>/dev/null || true
+for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do umount -lf "$p" 2>/dev/null || true; done
+wipefs -af "$DISK" >/dev/null
+sgdisk -Z "$DISK" >/dev/null
+sgdisk -n1:0:+1M   -t1:ef02 -c1:bios-boot \
+       -n2:0:+512M -t2:ef00 -c2:EFI \
+       -n3:0:0     -t3:8304 -c3:attackframe "$DISK" >/dev/null
+partprobe "$DISK" 2>/dev/null || true; udevadm settle
+EFI_P=$(part 2); ROOT_P=$(part 3)
+mkfs.vfat -F32 -n AF_EFI "$EFI_P" >/dev/null
+mkfs.ext4 -F -q -L attackframe "$ROOT_P"
+
+mkdir -p "$T"; mount "$ROOT_P" "$T"
+mkdir -p "$T/boot/efi"; mount "$EFI_P" "$T/boot/efi"
+
+# ------------------------------------------------------------------ copy
+say "copying the system ($(du -h "$SQUASH" | cut -f1) compressed — this takes a while)"
+unsquashfs -f -q -d "$T" "$SQUASH"
+
+for d in dev dev/pts proc sys run; do mkdir -p "$T/$d"; done
+mount --bind /dev "$T/dev"; mount --bind /dev/pts "$T/dev/pts"
+mount -t proc proc "$T/proc"; mount -t sysfs sys "$T/sys"; mount -t tmpfs tmpfs "$T/run"
+((UEFI)) && mount --bind /sys/firmware/efi/efivars "$T/sys/firmware/efi/efivars" 2>/dev/null || true
+rm -f "$T/etc/resolv.conf"; cp -L /etc/resolv.conf "$T/etc/resolv.conf"
+inchroot() { chroot "$T" /usr/bin/env DEBIAN_FRONTEND=noninteractive "$@"; }
+
+# ------------------------------------------------------------------ configure
+say "configuring the installed system"
+cat > "$T/etc/fstab" <<EOF
+# <fs>                                     <mount>    <type> <options>          <dump> <pass>
+UUID=$(blkid -s UUID -o value "$ROOT_P")  /          ext4   errors=remount-ro  0      1
+UUID=$(blkid -s UUID -o value "$EFI_P")   /boot/efi  vfat   umask=0077         0      1
+EOF
+echo "$HOSTNAME_NEW" > "$T/etc/hostname"
+printf '127.0.0.1 localhost\n127.0.1.1 %s\n::1 localhost ip6-localhost ip6-loopback\n' "$HOSTNAME_NEW" > "$T/etc/hosts"
+: > "$T/etc/machine-id"; inchroot systemd-machine-id-setup >/dev/null
+
+# live-only bits out
+inchroot apt-get -y purge casper >/dev/null 2>&1 || warn "could not purge casper"
+rm -f "$T/etc/casper.conf" "$T/var/lib/attackframe/firstboot.done"
+rm -f "$T/etc/sudoers.d/attackframe-podman" "$T/etc/containers/storage.conf"   # Podman-era leftovers
+
+# user
+inchroot useradd -m -s /usr/bin/zsh -c "AttackFrame Operator" -G sudo "$USERNAME"
+printf '%s:%s\n' "$USERNAME" "$PW1" | inchroot chpasswd
+groups=(adm dialout plugdev netdev wireshark)
+# docker group = run the Kali/BlackArch boxes without sudo (it is root-equivalent)
+((DOCKER_GROUP)) && groups+=(docker)
+for g in "${groups[@]}"; do inchroot getent group "$g" >/dev/null && inchroot usermod -aG "$g" "$USERNAME"; done
+unset PW1 PW2
+
+# keep the live user's work (target file, notes, …) if it's there
+if [[ -d /home/ghost ]] && ((!YES)); then
+  read -rp "copy /home/ghost (live session files) into /home/$USERNAME? [y/N] " a
+  if [[ $a == [yY] ]]; then
+    rsync -a --exclude '.cache' /home/ghost/ "$T/home/$USERNAME/"
+    inchroot chown -R "$USERNAME:" "/home/$USERNAME"
+  fi
+fi
+
+# ------------------------------------------------------------------ boot
+say "installing the bootloader (BIOS + UEFI)"
+mkdir -p "$T/etc/default"
+cat > "$T/etc/default/grub" <<'EOF'
+GRUB_DEFAULT=0
+GRUB_TIMEOUT_STYLE=menu
+GRUB_TIMEOUT=3
+GRUB_DISTRIBUTOR="AttackFrame OS"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
+GRUB_CMDLINE_LINUX=""
+GRUB_DISABLE_OS_PROBER=false
+GRUB_COLOR_NORMAL="light-cyan/black"
+GRUB_COLOR_HIGHLIGHT="black/light-cyan"
+EOF
+inchroot update-initramfs -c -k all >/dev/null 2>&1 || inchroot update-initramfs -u -k all
+inchroot grub-install --target=i386-pc --recheck "$DISK" || warn "BIOS grub-install failed"
+inchroot grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=attackframe \
+  --removable --recheck --no-nvram || warn "UEFI (removable path) grub-install failed"
+SBD=$T/usr/share/attackframe/secureboot
+if [[ -f $SBD/shimx64.efi && -f $SBD/grubx64.efi ]]; then
+  # Secure Boot: shim (Microsoft-signed) -> GRUB (Canonical-signed) -> Ubuntu's signed kernel.
+  # The signed GRUB reads its config from /EFI/ubuntu, so that's where the stub goes.
+  root_uuid=$(blkid -s UUID -o value "$ROOT_P")
+  for d in ubuntu BOOT; do
+    e=$T/boot/efi/EFI/$d; mkdir -p "$e"
+    cp "$SBD/grubx64.efi" "$e/grubx64.efi"; cp "$SBD/mmx64.efi" "$e/mmx64.efi"
+    printf "search.fs_uuid %s root\nset prefix=(\$root)'/boot/grub'\nconfigfile \$prefix/grub.cfg\n" "$root_uuid" > "$e/grub.cfg"
+  done
+  cp "$SBD/shimx64.efi" "$T/boot/efi/EFI/ubuntu/shimx64.efi"
+  cp "$SBD/shimx64.efi" "$T/boot/efi/EFI/BOOT/BOOTX64.EFI"
+  if ((UEFI)); then
+    efibootmgr -q -c -d "$DISK" -p 2 -L "AttackFrame OS" -l '\EFI\ubuntu\shimx64.efi' \
+      || warn "could not register an NVRAM boot entry (the removable path still boots)"
+  fi
+  say "UEFI boot is Secure Boot capable"
+elif ((UEFI)); then
+  inchroot grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=attackframe --recheck \
+    || warn "could not register an NVRAM boot entry (the removable path still boots)"
+fi
+inchroot update-grub
+
+ln -sf ../run/systemd/resolve/stub-resolv.conf "$T/etc/resolv.conf"
+sync
+say "done — remove the live medium and reboot into AttackFrame OS"
+say "Kali/BlackArch boxes are created on first use: ${C}kali${R}, ${C}blackarch${R}, or any tool name"
+say "(the baked images are loaded into Docker the first time — about a minute each)"

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Generate categorised app-grid launchers for available tools from tools.tsv.
+# A tool counts as available when it is on the PATH — natively or as a shim that
+# runs it from the Kali / BlackArch box (attackframe-box sync writes those).
+set -uo pipefail
+TSV=/usr/share/attackframe/tools.tsv
+OUT=/usr/share/applications
+PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+rm -f "$OUT"/af-*.desktop
+
+n=0
+while IFS=$'\t' read -r id cat layer mode cmd name desc; do
+  [[ -z "$id" || "$id" == \#* ]] && continue
+  bin=${cmd%% *}
+  command -v "$bin" >/dev/null 2>&1 || continue
+  icon="attackframe-${cat,,}"
+  if [[ $mode == gui ]]; then
+    exec_line=$cmd
+  else
+    # show the tool's help, then leave an interactive shell open in $HOME
+    exec_line="gnome-terminal --title=\"$name // AttackFrame\" -- zsh -ic \"af-tool-intro $bin; exec zsh\""
+  fi
+  cat > "$OUT/af-$id.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=$name
+Comment=$desc  [$layer]
+Exec=$exec_line
+Icon=$icon
+Terminal=false
+Categories=X-AttackFrame-$cat;
+Keywords=attackframe;pentest;$layer;$id;
+DESKTOP
+  ((n++))
+done < "$TSV"
+
+cat > "$OUT/attackframe-arsenal.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=AttackFrame Arsenal
+Comment=Install Kali and BlackArch tools into the container layers
+Exec=gnome-terminal --title="ARSENAL // AttackFrame" -- zsh -ic "attackframe-arsenal menu; exec zsh"
+Icon=attackframe
+Terminal=false
+Categories=System;
+Keywords=blackarch;kali;tools;install;docker;
+DESKTOP
+update-desktop-database -q "$OUT" 2>/dev/null || true
+echo "attackframe-launchers: $n tool launchers"

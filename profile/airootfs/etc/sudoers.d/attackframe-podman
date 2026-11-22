@@ -1,0 +1,5 @@
+# AttackFrame's Kali and BlackArch layers are rootful Podman boxes. This lets
+# members of the sudo group start them (and GUI tools launched from the app grid)
+# without a password prompt. Rootful podman is root-equivalent: remove this file
+# (or install with `attackframe-install --strict-sudo`) to always require a password.
+%sudo ALL=(root) NOPASSWD:SETENV: /usr/bin/podman

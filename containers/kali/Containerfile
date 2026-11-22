@@ -1,0 +1,41 @@
+# AttackFrame Kali layer image. Built by scripts/build-in-container.sh and baked
+# into the ISO's read-only image store; distrobox turns it into the `kali` box.
+ARG BASE=docker.io/kalilinux/kali-rolling:latest
+FROM ${BASE}
+
+ARG META=""
+ENV DEBIAN_FRONTEND=noninteractive
+COPY packages.txt /tmp/packages.txt
+
+# distrobox's own dependencies, so the first `distrobox enter` needs no network
+RUN set -eux; \
+    apt-get update; \
+    apt-get -y full-upgrade; \
+    apt-get -y install --no-install-recommends \
+      sudo bash bc bzip2 curl wget diffutils findutils gnupg hostname iproute2 \
+      iputils-ping keyutils less locales lsof man-db ncurses-base openssh-client \
+      passwd pigz pinentry-curses procps rsync time tree tzdata unzip util-linux \
+      xauth xz-utils zip zsh libnss-myhostname libvte-2.91-common libegl1 libgl1 \
+      libvulkan1 mesa-vulkan-drivers ca-certificates
+
+# the curated tool set (+ an optional Kali metapackage). Names without an install
+# candidate (dropped from Kali, or only referenced by other packages) are skipped;
+# if the batch install still fails, retry one by one so a single bad package
+# can't break the image. Both lists are logged under /var/log in the image.
+RUN set -u; export LC_ALL=C; \
+    want=""; \
+    for p in ${META} $(sed 's/#.*//' /tmp/packages.txt); do \
+      if apt-cache policy "$p" 2>/dev/null | grep -q 'Candidate: [^(]'; then want="$want $p"; \
+      else echo "$p" >> /var/log/attackframe-skipped.txt; echo "skip (no install candidate in Kali): $p"; fi; \
+    done; \
+    if ! apt-get -y install $want; then \
+      echo "!! batch install failed — retrying package by package"; \
+      apt-get -y -f install || true; \
+      for p in $want; do \
+        apt-get -y install "$p" || { echo "$p" >> /var/log/attackframe-failed.txt; echo "!! failed: $p"; }; \
+      done; \
+    fi; \
+    apt-get clean; rm -rf /var/lib/apt/lists/* /tmp/packages.txt
+
+LABEL org.opencontainers.image.title="AttackFrame Kali layer" \
+      io.attackframe.layer="kali"

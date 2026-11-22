@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# AttackFrame terminal banner.
+C=$'\e[38;2;0;240;255m'; M=$'\e[38;2;255;43;214m'; Y=$'\e[38;2;245;255;59m'; D=$'\e[38;2;90;110;140m'; R=$'\e[0m'
+cat <<BANNER
+${C} ▄▀█ ▀█▀ ▀█▀ ▄▀█ █▀▀ █▄▀ ${M}▞▞ ${C}█▀▀ █▀█ ▄▀█ █▀▄▀█ █▀▀
+${C} █▀█  █   █  █▀█ █▄▄ █ █ ${M}▞▞ ${C}█▀  █▀▄ █▀█ █ ▀ █ ██▄${R}
+${D} ─────────────────────────────────────────────────${R}
+BANNER
+lan=$(ip -4 -o addr show scope global 2>/dev/null | awk '$2 !~ /^(tun|tap|wg|ppp|docker|veth|br-|cni)/{split($4,a,"/");print a[1];exit}')
+vpn=$(ip -4 -o addr show 2>/dev/null | awk '$2 ~ /^(tun|tap|wg|ppp)/{split($4,a,"/");print $2" "a[1];exit}')
+tgt=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/attackframe/target" 2>/dev/null)
+# box state without prompting for a password ("?" if Docker isn't reachable)
+box() {   # prints "<plain>|<colour>"
+  local s
+  local dk=(docker); docker info >/dev/null 2>&1 || dk=(sudo -n docker)
+  if ! s=$("${dk[@]}" inspect -f '{{.State.Running}}' "$1" 2>/dev/null); then
+    if "${dk[@]}" info >/dev/null 2>&1; then echo "not set up|$D"; else echo "?|$D"; fi
+    return
+  fi
+  [[ $s == true ]] && echo "online|$C" || echo "standby|$Y"
+}
+IFS='|' read -r ks kc <<<"$(box kali)"
+IFS='|' read -r bs bc <<<"$(box blackarch)"
+shims=$(grep -l '^# attackframe-shim' /usr/local/bin/* 2>/dev/null | wc -l)
+printf " ${D}operator${R} %-14s ${D}node${R} %-16s ${D}kernel${R} %s\n" "$USER" "$(cat /etc/hostname 2>/dev/null)" "$(uname -r)"
+printf " ${D}lan${R}      ${C}%-14s${R} ${D}vpn${R}  ${Y}%-16s${R} ${D}target${R} ${M}%s${R}\n" "${lan:-offline}" "${vpn:-down}" "${tgt:-none}"
+printf " ${D}kali${R}     %s%-14s${R} ${D}ba${R}   %s%-16s${R} ${D}tools${R}  %s\n\n" "$kc" "$ks" "$bc" "$bs" "$shims"

@@ -133,8 +133,5 @@ The console gives you access to Kali and BlackArch on the same instance. BlackAr
 
 ![](console-6.png)
 
-## Download ISO
 
-Latest published build (the previous Arch-based release, until a new Ubuntu build is uploaded):
 
-https://drive.google.com/file/d/1NnWqH15S-2wakKUYCuja3WC-GhwAbDnF/view?usp=sharing

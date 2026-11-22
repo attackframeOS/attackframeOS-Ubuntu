@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# attackframe-arsenal — one front-end for both tool layers:
+#   Kali      (Debian/apt)    in the Docker (distrobox) box 'kali'
+#   BlackArch (Arch/pacman)   in the Docker (distrobox) box 'blackarch'
+set -uo pipefail
+
+C=$'\e[38;2;0;240;255m'; M=$'\e[38;2;255;43;214m'; Y=$'\e[38;2;245;255;59m'; D=$'\e[38;2;90;110;140m'; R=$'\e[0m'
+BOX=/usr/local/bin/attackframe-box
+
+usage() {
+  cat <<USAGE
+${C}attackframe-arsenal${R} — the AttackFrame tool layer manager
+
+  ${Y}status${R}                      state of the Kali and BlackArch boxes
+  ${Y}install${R} <item>...           install tools; items are
+                                ${M}kali:${R}<meta|pkg>   e.g. kali:default kali:tools-wireless kali:seclists
+                                ${M}ba:${R}<category|pkg> e.g. ba:webapp ba:recon ba:katana
+                                bare names: BlackArch category → BlackArch, else Kali, else BlackArch
+  ${Y}categories${R}                  list BlackArch categories with package counts
+  ${Y}show${R} <category>             list tools in a BlackArch category
+  ${Y}kali-metas${R}                  list Kali metapackages
+  ${Y}full${R} [kali|blackarch]       everything (kali-linux-everything / all of BlackArch)
+  ${Y}search${R} <term>               search both layers
+  ${Y}update${R}                      update the host and both boxes
+  ${Y}menu${R}                        interactive menu
+USAGE
+}
+
+install_items() {
+  local x kali=() ba=() synced=0
+  for x in "$@"; do
+    case $x in
+      kali:*) kali+=("${x#kali:}") ;;
+      ba:*|blackarch:*) ba+=("${x#*:}") ;;
+      kali-*) kali+=("$x") ;;
+      blackarch-*) ba+=("$x") ;;
+      *)
+        ((synced)) || { sudo "$BOX" kali run apt-get update -qq >/dev/null 2>&1; synced=1; }
+        if [[ -n $("$BOX" blackarch run pacman -Sgq "blackarch-$x" 2>/dev/null | head -1) ]]; then ba+=("$x")
+        elif "$BOX" kali run apt-cache show "$x" >/dev/null 2>&1; then kali+=("$x")
+        else ba+=("$x"); fi ;;
+    esac
+  done
+  ((${#kali[@]})) && "$BOX" kali setup "${kali[@]}"
+  ((${#ba[@]}))   && "$BOX" blackarch setup "${ba[@]}"
+  return 0
+}
+
+full() {
+  case ${1:-both} in
+    kali)      "$BOX" kali setup everything ;;
+    blackarch) "$BOX" blackarch setup full ;;
+    *)         "$BOX" kali setup everything; "$BOX" blackarch setup full ;;
+  esac
+}
+
+menu() {
+  clear; command -v af-banner >/dev/null && af-banner
+  PS3="${M}arsenal${R}> "
+  select _ in "Layer status" "Install BlackArch categories" "Install Kali metapackage" \
+              "Install tools (any name)" "Enter Kali shell" "Enter BlackArch shell" \
+              "Update everything" "Quit"; do
+    case $REPLY in
+      1) "$BOX" status ;;
+      2) "$BOX" blackarch categories; read -rp "categories (space separated): " -a cats
+         ((${#cats[@]})) && "$BOX" blackarch setup "${cats[@]}" ;;
+      3) echo "  ${Y}default${R} large everything headless top10 tools-<name>  ${D}(kali-metas lists them)${R}"
+         read -rp "metapackage: " meta; [[ -n $meta ]] && "$BOX" kali setup "$meta" ;;
+      4) read -rp "tools (kali:x / ba:x / bare): " -a items; ((${#items[@]})) && install_items "${items[@]}" ;;
+      5) "$BOX" kali enter ;;
+      6) "$BOX" blackarch enter ;;
+      7) "$0" update ;;
+      *) break ;;
+    esac
+  done
+}
+
+case "${1:-}" in
+  status)          "$BOX" status ;;
+  install)         shift; (($#)) || { usage; exit 1; }; install_items "$@" ;;
+  categories|cats) "$BOX" blackarch categories ;;
+  show)            "$BOX" blackarch show "${2:?category}" ;;
+  kali-metas)      "$BOX" kali search '^kali-(linux|tools)-' | sort ;;
+  full)            full "${2:-both}" ;;
+  search)          echo "${C}── kali${R}"; "$BOX" kali search "${2:?term}"
+                   echo "${C}── blackarch${R}"; "$BOX" blackarch search "$2" ;;
+  update)          sudo apt-get update && sudo apt-get -y full-upgrade
+                   "$BOX" kali update || true; "$BOX" blackarch update || true; "$BOX" sync ;;
+  kali)            shift; exec "$BOX" kali "$@" ;;
+  blackarch|ba)    shift; exec "$BOX" blackarch "$@" ;;
+  menu)            menu ;;
+  *)               usage ;;
+esac

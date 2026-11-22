@@ -1,0 +1,67 @@
+# Ubuntu base system for the AttackFrame live/install image (apt names).
+# Names that don't exist on the chosen Ubuntu release are skipped with a warning.
+# The kernel is added by the build (KERNEL_PKG).
+
+# ---- live boot -----------------------------------------------------------
+casper
+discover
+laptop-detect
+os-prober
+systemd-sysv
+initramfs-tools
+plymouth
+plymouth-theme-spinner
+linux-firmware
+intel-microcode
+amd64-microcode
+# ---- core ----------------------------------------------------------------
+sudo
+locales
+tzdata
+ca-certificates
+curl
+wget
+gnupg
+lsb-release
+software-properties-common
+bash-completion
+less
+man-db
+nano
+iproute2
+iputils-ping
+dnsutils
+net-tools
+openssh-client
+wpasupplicant
+wireless-regdb
+rfkill
+usbutils
+pciutils
+lshw
+unzip
+zip
+xz-utils
+zstd
+# ---- installer (attackframe-install) -------------------------------------
+grub-common
+grub2-common
+grub-pc-bin
+grub-efi-amd64-bin
+efibootmgr
+mokutil
+gdisk
+parted
+dosfstools
+e2fsprogs
+squashfs-tools
+rsync
+# ---- container layers (Kali + BlackArch) ---------------------------------
+docker.io
+docker-buildx
+docker-compose-v2
+distrobox
+# ---- VM guests -----------------------------------------------------------
+spice-vdagent
+open-vm-tools-desktop
+qemu-guest-agent

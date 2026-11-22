@@ -1,0 +1,14 @@
+[Unit]
+Description=AttackFrame OS first-boot setup (theme, launchers, container storage)
+After=local-fs.target casper.service
+# not docker.socket: it belongs to the early sockets.target (ordering cycle)
+Before=display-manager.service systemd-user-sessions.service docker.service containerd.service
+ConditionPathExists=!/var/lib/attackframe/firstboot.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/attackframe-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

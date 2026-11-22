@@ -1,0 +1,89 @@
+# Curated tools baked into the Kali container image (kali-rolling apt names).
+# More later: `attackframe-kali setup default|large|everything` or `kali-install <pkg>`.
+# Names missing from the Kali repo are skipped at build time and logged in the
+# image at /var/log/attackframe-skipped.txt.
+
+# 01 RECON
+nmap
+masscan
+amass
+subfinder
+dnsenum
+dnsrecon
+whatweb
+theharvester
+enum4linux-ng
+smbmap
+netdiscover
+arp-scan
+# 02 WEB
+burpsuite
+zaproxy
+sqlmap
+nikto
+gobuster
+ffuf
+feroxbuster
+wfuzz
+wpscan
+nuclei
+httpx-toolkit
+# 03 EXPLOIT
+metasploit-framework
+exploitdb
+python3-pwntools
+# 04 CRACK
+john
+hashcat
+hydra
+medusa
+crunch
+cewl
+hashid
+seclists
+wordlists
+# 05 WIRELESS
+aircrack-ng
+kismet
+reaver
+wifite
+hcxtools
+hcxdumptool
+# 06 SNIFF / SPOOF
+wireshark
+tcpdump
+ettercap-graphical
+bettercap
+responder
+mitmproxy
+# 07 ACTIVE DIRECTORY
+python3-impacket
+impacket-scripts
+netexec
+evil-winrm
+bloodhound
+bloodhound.py
+kerbrute
+certipy-ad
+# 08 REVERSE
+ghidra
+radare2
+gdb
+binwalk
+jadx
+apktool
+# 09 FORENSICS
+volatility3
+sleuthkit
+foremost
+libimage-exiftool-perl
+testdisk
+# PIVOT / UTIL
+proxychains4
+tor
+openvpn
+wireguard-tools
+socat
+netcat-openbsd
+chisel
+ligolo-ng

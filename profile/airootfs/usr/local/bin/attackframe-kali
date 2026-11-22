@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# attackframe-kali — manage the Kali tool layer (see: attackframe-kali help)
+exec /usr/local/bin/attackframe-box kali "$@"

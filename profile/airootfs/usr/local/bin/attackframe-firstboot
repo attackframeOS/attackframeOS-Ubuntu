@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# One-shot system setup. Runs on every live boot (fresh overlay) and once on an
+# installed system. Done at boot rather than at ISO build time so nothing here
+# collides with files owned by packages.
+set -uo pipefail
+AFS=/usr/share/attackframe
+LIVE=0; { [[ -d /run/casper ]] || grep -qw 'boot=casper' /proc/cmdline; } && LIVE=1
+log() { echo "[attackframe-firstboot] $*"; }
+
+# ---- container storage ---------------------------------------------------
+# On the live ISO / is an overlay over squashfs, and Docker's overlay storage
+# can't sit on top of another overlay. Give Docker (and containerd, its image
+# store) a tmpfs; this runs before docker.service starts. The baked Kali and
+# BlackArch images are loaded from /usr/share/attackframe/images on first use.
+# RAM is tight for big images (loading one briefly needs ~2x its size), so a
+# partition labelled AF-DOCKER (ext4/xfs/btrfs, e.g. on the boot USB or an
+# internal disk) is used for Docker's storage instead when it's present.
+if (( LIVE )); then
+  part=$(blkid -L AF-DOCKER 2>/dev/null || true)
+  if [[ -n $part ]] && ! mountpoint -q /var/lib/docker; then
+    mkdir -p /mnt/af-docker /var/lib/docker /var/lib/containerd
+    if mount "$part" /mnt/af-docker; then
+      mkdir -p /mnt/af-docker/docker /mnt/af-docker/containerd
+      mount --bind /mnt/af-docker/docker /var/lib/docker
+      mount --bind /mnt/af-docker/containerd /var/lib/containerd
+      log "Docker storage on $part (AF-DOCKER) — boxes and images persist across boots"
+    fi
+  fi
+  for d in /var/lib/docker /var/lib/containerd; do
+    mountpoint -q "$d" && continue
+    mkdir -p "$d"
+    mount -t tmpfs -o size=75%,mode=0711 tmpfs "$d" && log "$d on tmpfs (RAM)"
+  done
+fi
+
+# ---- GNOME Shell theme ---------------------------------------------------
+/usr/local/bin/attackframe-theme || true
+
+# ---- tool launchers + icon cache + dconf ---------------------------------
+/usr/local/bin/attackframe-launchers || true
+for d in /usr/share/icons/hicolor /usr/share/icons/AttackFrame-*; do gtk-update-icon-cache -qf "$d" 2>/dev/null || true; done
+dconf update 2>/dev/null || true
+
+# ---- live operator ---------------------------------------------------------
+# casper creates "ghost" (autologin, passwordless sudo) before we run
+if (( LIVE )); then
+  if id ghost &>/dev/null; then
+    usermod -s /usr/bin/zsh ghost
+    getent group docker >/dev/null && usermod -aG docker ghost   # boxes without sudo prompts
+    [[ -f /home/ghost/.zshrc ]] || { cp -rT "$AFS/skel" /home/ghost; chown -R ghost: /home/ghost; }
+  fi
+else
+  mkdir -p /var/lib/attackframe && touch /var/lib/attackframe/firstboot.done
+fi
+log "complete (live=$LIVE)"

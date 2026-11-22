@@ -1,0 +1,40 @@
+# Curated tools baked into the BlackArch container image (Arch + BlackArch names).
+# Focus: tools Kali doesn't ship (or ships older), so the two layers complement
+# each other. More later: `attackframe-blackarch setup <category>|full`.
+# Names missing from the repos are skipped at build time and logged in the image
+# at /var/log/attackframe-skipped.txt.
+
+# RECON
+rustscan
+naabu
+dnsx
+katana
+gau
+waybackurls
+hakrawler
+gospider
+assetfinder
+# WEB
+dalfox
+arjun
+paramspider
+ghauri
+nosqlmap
+jwt-tool
+crlfuzz
+x8
+httpx
+# SECRETS / CODE
+trufflehog
+gitleaks
+# ACTIVE DIRECTORY
+bloodhound-python
+coercer
+kerbrute
+# REVERSE / PWN
+pwndbg
+rizin
+# PIVOT / C2
+ligolo-ng
+chisel
+sliver

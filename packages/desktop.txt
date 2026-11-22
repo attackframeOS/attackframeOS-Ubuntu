@@ -1,0 +1,85 @@
+# GNOME desktop for AttackFrame OS (Ubuntu apt names, installed without
+# recommends — so this list is explicit). Firefox is added by the build from Mozilla's apt repo
+# (Ubuntu's own firefox package is a snap, and snapd is pinned out).
+
+# ---- GNOME desktop -------------------------------------------------------
+gdm3
+gnome-shell
+gnome-session
+gnome-control-center
+gnome-settings-daemon
+gnome-terminal
+gnome-text-editor
+gnome-system-monitor
+gnome-disk-utility
+gnome-tweaks
+gnome-keyring
+libpam-gnome-keyring
+gnome-shell-extensions
+gnome-shell-extension-prefs
+gnome-shell-extension-manager
+gnome-shell-extension-appindicator
+gnome-backgrounds
+nautilus
+file-roller
+evince
+loupe
+eog
+xdg-user-dirs-gtk
+xdg-desktop-portal-gnome
+xdg-desktop-portal-gtk
+gvfs
+gvfs-backends
+xwayland
+# Xorg fallback: GDM disables Wayland on many virtual GPUs (QEMU/VMware/VirtualBox)
+xserver-xorg-core
+xserver-xorg-video-all
+xserver-xorg-input-all
+x11-xserver-utils
+dbus-user-session
+accountsservice
+polkitd
+pkexec
+policykit-1
+at-spi2-core
+gsettings-desktop-schemas
+adwaita-icon-theme
+fonts-cantarell
+network-manager
+network-manager-gnome
+network-manager-openvpn-gnome
+network-manager-openconnect-gnome
+pipewire
+pipewire-pulse
+wireplumber
+pulseaudio-utils
+bluez
+dconf-cli
+dconf-gsettings-backend
+libglib2.0-bin
+libgtk-3-bin
+# ---- look & feel ---------------------------------------------------------
+adw-gtk3
+papirus-icon-theme
+fonts-jetbrains-mono
+fonts-noto-core
+fonts-noto-color-emoji
+# ---- shell / workflow ----------------------------------------------------
+zsh
+zsh-autosuggestions
+zsh-syntax-highlighting
+tmux
+fzf
+bat
+eza
+ripgrep
+btop
+fastfetch
+neofetch
+neovim
+git
+python3
+python3-pip
+python3-venv
+openvpn
+wireguard-tools

@@ -1,0 +1,2 @@
+// Rebuild the AttackFrame GNOME Shell theme when gnome-shell is upgraded.
+DPkg::Post-Invoke { "if [ -x /usr/local/bin/attackframe-theme ]; then /usr/local/bin/attackframe-theme --if-changed >/dev/null 2>&1 || true; fi"; };

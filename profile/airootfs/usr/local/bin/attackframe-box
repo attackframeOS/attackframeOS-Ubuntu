@@ -1,0 +1,348 @@
+#!/usr/bin/env bash
+# attackframe-box — the Kali and BlackArch tool layers of AttackFrame OS.
+#
+# The host is Ubuntu. Kali (Debian/apt) and BlackArch (Arch/pacman) each run as a
+# distrobox container on Docker that shares the host network, $HOME, USB devices
+# and the display, so their tools behave like native ones — raw sockets included.
+# The ISO ships pre-built images for both (/usr/share/attackframe/images/*.tar);
+# they're loaded into Docker the first time a box is created, so it works offline.
+#
+# Tools listed in /usr/share/attackframe/tools.tsv get a small shim in
+# /usr/local/bin, so `nmap`, `sudo nmap`, `burpsuite` … just work from the host
+# shell and the app grid. Use `kali <cmd>` / `blackarch <cmd>` for anything else.
+set -uo pipefail
+
+AFS=/usr/share/attackframe
+STATE=/var/lib/attackframe
+TSV=$AFS/tools.tsv
+SHIM_TAG='# attackframe-shim'
+C=$'\e[38;2;0;240;255m'; M=$'\e[38;2;255;43;214m'; Y=$'\e[38;2;245;255;59m'; D=$'\e[38;2;90;110;140m'; R=$'\e[0m'
+SUDO=; ((EUID)) && SUDO=sudo
+IMAGES=$AFS/images
+export DBX_CONTAINER_MANAGER=docker
+
+say()  { printf '%s>>%s %s\n' "$C" "$R" "$*" >&2; }
+warn() { printf '%s!!%s %s\n' "$Y" "$R" "$*" >&2; }
+die()  { printf '%s!!%s %s\n' "$M" "$R" "$*" >&2; exit 1; }
+
+# ------------------------------------------------------------------ layers
+layer_conf() {
+  case $1 in
+    kali)
+      LAYER=kali; NAME=${AF_KALI_NAME:-kali}
+      LOCAL=attackframe/kali:latest
+      BASE=${AF_KALI_IMAGE:-docker.io/kalilinux/kali-rolling:latest} ;;
+    blackarch|ba)
+      LAYER=blackarch; NAME=${AF_BLACKARCH_NAME:-blackarch}
+      LOCAL=attackframe/blackarch:latest
+      BASE=${AF_BLACKARCH_BASE:-docker.io/archlinux/archlinux:latest} ;;
+    *) die "unknown layer '$1' (kali|blackarch)" ;;
+  esac
+}
+
+# docker directly when we can reach the daemon (root or the docker group), else via sudo
+DK=()
+dk() {
+  if ((${#DK[@]} == 0)); then
+    if ((EUID == 0)) || docker info >/dev/null 2>&1; then DK=(docker); else DK=(sudo docker); fi
+  fi
+  "${DK[@]}" "$@"
+}
+exists()     { dk container inspect "$NAME" >/dev/null 2>&1; }
+tarball()    { echo "$IMAGES/$LAYER.tar"; }
+have_image() { dk image inspect "$LOCAL" >/dev/null 2>&1 || [[ -f $(tarball) ]]; }
+
+# first use of a baked image: load it from the ISO into Docker (one-time)
+load_image() {
+  dk image inspect "$LOCAL" >/dev/null 2>&1 && return 0
+  [[ -f $(tarball) ]] || return 1
+  say "loading the baked $LAYER image into Docker (one-time, $(du -h "$(tarball)" | cut -f1))…"
+  dk load -i "$(tarball)" >/dev/null || die "docker load failed (on the live ISO this needs free RAM)"
+}
+
+# distrobox refuses to run under sudo; hand it back to the invoking user.
+# Members of the docker group drive Docker directly; everyone else uses --root (sudo).
+dbx() {
+  local rootf=()
+  if ((EUID == 0)); then
+    [[ -n ${SUDO_USER:-} && $SUDO_USER != root ]] || die "run this as your user (not a root shell)"
+    id -nG "$SUDO_USER" | grep -qw docker || rootf=(--root)
+    sudo -u "$SUDO_USER" -H env DBX_CONTAINER_MANAGER=docker distrobox "$1" "${rootf[@]}" "${@:2}"
+  else
+    docker info >/dev/null 2>&1 || rootf=(--root)
+    distrobox "$1" "${rootf[@]}" "${@:2}"
+  fi
+}
+
+create() {
+  exists && return 0
+  local img=$LOCAL fresh=0
+  if ! load_image; then img=$BASE; fresh=1; say "no baked $LAYER image — pulling $BASE"; fi
+  say "creating the ${M}$NAME${R} box from $img"
+  dbx create --yes --no-entry --name "$NAME" --image "$img" \
+    --additional-flags "--cap-add=NET_ADMIN --cap-add=NET_RAW --device=/dev/net/tun" \
+    || die "distrobox create failed"
+  ((fresh)) && [[ $LAYER == blackarch ]] && bootstrap_blackarch
+  return 0
+}
+
+# start the box and wait for distrobox-init to finish its first-run setup
+ready() {
+  exists || create
+  dk start "$NAME" >/dev/null 2>&1 || true
+  local i
+  for ((i = 0; i < 600; i++)); do
+    dk logs "$NAME" 2>&1 | grep -q 'container_setup_done' && return 0
+    ((i == 4)) && say "waiting for the $NAME box to initialise (first start only)…"
+    sleep 0.5
+  done
+  warn "$NAME box is still initialising — continuing anyway"
+}
+
+# run as root inside the box (package management, raw-socket tools under sudo)
+root_exec() {
+  ready
+  local t=() wd=${AF_WORKDIR:-$PWD}
+  [[ -t 0 && -t 1 ]] && t=(-t)
+  dk exec "$NAME" test -d "$wd" 2>/dev/null || wd=/root
+  dk exec -i "${t[@]}" -u root -w "$wd" \
+    -e TERM="${TERM:-xterm-256color}" -e DEBIAN_FRONTEND=noninteractive -e COLUMNS="${COLUMNS:-120}" \
+    "$NAME" "$@"
+}
+
+bootstrap_blackarch() {
+  root_exec sh -c 'grep -q "^\[blackarch\]" /etc/pacman.conf' 2>/dev/null && return 0
+  say "adding the BlackArch repository with the official strap.sh"
+  root_exec env STRAP_SHA1="${STRAP_SHA1:-}" bash -c '
+    set -e
+    grep -q "^DisableSandbox" /etc/pacman.conf || sed -i "/^\[options\]/a DisableSandbox" /etc/pacman.conf
+    pacman -Syu --noconfirm --needed curl
+    curl -fsSL -o /tmp/strap.sh https://blackarch.org/strap.sh
+    sum=$(sha1sum /tmp/strap.sh | cut -d" " -f1)
+    echo "strap.sh sha1: $sum  (compare: https://blackarch.org/downloads.html)"
+    if [ -n "$STRAP_SHA1" ] && [ "$sum" != "$STRAP_SHA1" ]; then echo "checksum mismatch" >&2; exit 1; fi
+    bash /tmp/strap.sh </dev/null; rm -f /tmp/strap.sh
+    pacman -Syu --noconfirm --needed base-devel git' || die "BlackArch bootstrap failed"
+}
+
+# ------------------------------------------------------------------ packages
+list_file() { sed 's/#.*//; s/[[:space:]]//g; /^$/d' "$1"; }
+
+kali_target() {   # map a setup target to Kali package names
+  case $1 in
+    core)                    list_file "$AFS/kali-core.txt" ;;
+    kali-*)                  echo "$1" ;;
+    top10)                   echo kali-tools-top10 ;;
+    tools-*)                 echo "kali-$1" ;;
+    default|large|everything|headless|firmware|arm|nethunter) echo "kali-linux-$1" ;;
+    *)                       echo "$1" ;;
+  esac
+}
+
+ba_target() {     # map a setup target to BlackArch package/group names
+  case $1 in
+    core)       list_file "$AFS/blackarch-core.txt" ;;
+    full|all)   echo blackarch ;;
+    blackarch*) echo "$1" ;;
+    *)          if root_exec pacman -Sg "blackarch-$1" >/dev/null 2>&1; then echo "blackarch-$1"; else echo "$1"; fi ;;
+  esac
+}
+
+install_pkgs() {
+  (($#)) || return 0
+  if [[ $LAYER == kali ]]; then
+    root_exec bash -c '
+      apt-get update -qq || exit 1
+      export LC_ALL=C
+      want=(); for p; do
+        if apt-cache policy "$p" 2>/dev/null | grep -q "Candidate: [^(]"; then want+=("$p"); else echo "   skip (no install candidate in Kali): $p"; fi
+      done
+      ((${#want[@]})) || exit 0
+      apt-get -y full-upgrade
+      apt-get -y install "${want[@]}" && exit 0
+      echo "!! batch install failed — retrying package by package"
+      apt-get -y -f install || true
+      for p in "${want[@]}"; do apt-get -y install "$p" || echo "   failed: $p"; done' _ "$@"
+  else
+    root_exec bash -c '
+      log=/var/log/attackframe-failed.txt
+      pacman -Sy --noconfirm || exit 1
+      want=(); for p; do
+        if pacman -Si "$p" >/dev/null 2>&1 || pacman -Sg "$p" >/dev/null 2>&1; then want+=("$p"); else echo "   skip (not in BlackArch): $p"; fi
+      done
+      ((${#want[@]})) || exit 0
+      pacman -S --noconfirm --needed "${want[@]}" && exit 0
+      echo "!! transaction hit a conflict — falling back to per-package installs"
+      for g in "${want[@]}"; do
+        for p in $(pacman -Sgq "$g" 2>/dev/null || echo "$g"); do
+          pacman -Qq "$p" >/dev/null 2>&1 && continue
+          pacman -S --noconfirm --needed "$p" >/dev/null 2>&1 || { echo "$p" >> $log; echo "   failed: $p"; }
+        done
+      done
+      echo "failed packages are logged in the box at $log"' _ "$@"
+  fi
+}
+
+setup() {
+  local targets=("${@:-core}") pk=() t
+  if [[ $LAYER == blackarch && " ${targets[*]} " =~ " "(full|all|blackarch)" " ]]; then
+    warn "all of BlackArch is ~2,800 tools and tens of GB; on the live ISO it lives in RAM"
+    read -rp "Continue? [y/N] " a; [[ $a == [yY] ]] || return 1
+  fi
+  [[ $LAYER == kali && " ${targets[*]} " == *" everything "* ]] && warn "kali-linux-everything is 15+ GB"
+  create
+  ready
+  [[ $LAYER == blackarch ]] && bootstrap_blackarch
+  for t in "${targets[@]}"; do
+    if [[ $LAYER == kali ]]; then mapfile -t -O "${#pk[@]}" pk < <(kali_target "$t")
+    else mapfile -t -O "${#pk[@]}" pk < <(ba_target "$t"); fi
+  done
+  say "installing into ${M}$NAME${R}: ${pk[*]:0:12}$( ((${#pk[@]} > 12)) && echo " … (+$((${#pk[@]} - 12)))")"
+  install_pkgs "${pk[@]}"
+  sync_shims
+  say "ready. ${M}$LAYER <tool>${R} runs anything in the box; grid tools are on your PATH."
+}
+
+# ------------------------------------------------------------------ shims
+tsv_rows() { awk -F'\t' '!/^#/ && NF >= 7' "${1:-$TSV}"; }
+
+write_shim() {   # write_shim <prefix> <layer> <bin>
+  local f=$1/usr/local/bin/$3
+  [[ -e $f ]] && ! grep -q "^$SHIM_TAG" "$f" 2>/dev/null && return 1      # never clobber real files
+  [[ -x $1/usr/bin/$3 || -x $1/usr/sbin/$3 ]] && return 1                   # native host tool wins
+  printf '#!/bin/sh\n%s: %s\nexec /usr/local/bin/attackframe-box %s run %s "$@"\n' "$SHIM_TAG" "$2" "$2" "$3" \
+    | $SUDO tee "$f" >/dev/null && $SUDO chmod 755 "$f"
+}
+
+drop_shim() {
+  local f=${2:-}/usr/local/bin/$1
+  [[ -f $f ]] && grep -q "^$SHIM_TAG" "$f" && $SUDO rm -f "$f"
+  return 0
+}
+
+# Refresh the per-layer binary index (live) and (re)write the tools.tsv shims.
+#   sync               query running boxes, write shims, regenerate launchers
+#   sync --root DIR    offline: use DIR/var/lib/attackframe/bins-*.txt (ISO build)
+sync_shims() {
+  local prefix="" l
+  if [[ ${1:-} == --root ]]; then prefix=${2:?root dir}; SUDO=; fi
+  local tsv=$prefix$TSV st=$prefix$STATE
+  $SUDO mkdir -p "$st" "$prefix/usr/local/bin"
+  if [[ -z $prefix ]]; then
+    local bins; mapfile -t bins < <(tsv_rows "$tsv" | awk -F'\t' '{split($5,a," "); print a[1]}' | sort -u)
+    for l in kali blackarch; do
+      layer_conf "$l"
+      exists || continue
+      root_exec sh -c 'for b; do command -v "$b" >/dev/null 2>&1 && echo "$b"; done; true' _ "${bins[@]}" \
+        | tr -d '\r' | $SUDO tee "$st/bins-$l.txt" >/dev/null
+    done
+  fi
+  local pref cmd bin n=0 chosen
+  while IFS=$'\t' read -r _ _ pref _ cmd _ _; do
+    bin=${cmd%% *}
+    [[ $bin == kali || $bin == blackarch ]] && continue
+    chosen=""
+    for l in "$pref" kali blackarch; do
+      [[ -f $st/bins-$l.txt ]] && grep -qx -- "$bin" "$st/bins-$l.txt" && { chosen=$l; break; }
+    done
+    if [[ -n $chosen ]]; then write_shim "$prefix" "$chosen" "$bin" && n=$((n + 1)); fi
+  done < <(tsv_rows "$tsv")
+  say "$n tool shims in /usr/local/bin"
+  [[ -z $prefix ]] && command -v attackframe-launchers >/dev/null && $SUDO attackframe-launchers
+  return 0
+}
+
+# ------------------------------------------------------------------ commands
+usage() {
+  cat <<EOF
+${C}attackframe-$LAYER${R} — the ${M}$LAYER${R} tool layer (Docker box ${D}'$NAME'${R})
+
+  ${Y}setup${R} [target...]   create the box and install tools        (default: core)
+$(if [[ $LAYER == kali ]]; then cat <<'K'
+                      core | default | large | everything | headless | top10
+                      tools-<name> (e.g. tools-wireless) | any apt package
+K
+else cat <<'B'
+                      core | <category> (e.g. webapp, recon) | full | any package
+B
+fi)
+  ${Y}enter${R}               open a shell in the box
+  ${Y}run${R} <cmd...>        run a command in the box          (shortcut: ${M}$LAYER <cmd>${R})
+  ${Y}install${R} <pkg...>    install packages in the box
+  ${Y}search${R} <term>       search the box's repositories
+  ${Y}export${R} <bin...>     put a box binary on the host PATH (shim in /usr/local/bin)
+  ${Y}unexport${R} <bin...>   remove such shims
+  ${Y}sync${R}                re-index tools.tsv tools in both boxes, rewrite shims + launchers
+  ${Y}update${R}              upgrade everything in the box
+  ${Y}status${R}              box / image state
+  ${Y}remove${R}              delete the box (the baked image stays)
+$( [[ $LAYER == blackarch ]] && printf '  %scategories%s          list BlackArch categories\n  %sshow%s <category>     list tools in a category\n' "$Y" "$R" "$Y" "$R")
+EOF
+}
+
+status() {
+  local l s
+  for l in kali blackarch; do
+    layer_conf "$l"
+    if ! exists; then s="${D}not created${R}"
+    elif [[ $(dk inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null) == true ]]; then s="${C}running${R}"
+    else s="${Y}stopped${R}"; fi
+    printf '  %s%-10s%s box: %-22s image: %s\n' "$M" "$l" "$R" "$s" \
+      "$(if dk image inspect "$LOCAL" >/dev/null 2>&1; then echo "loaded ($LOCAL)"
+         elif [[ -f $(tarball) ]]; then echo "baked, loads on first use"; else echo "pull on setup ($BASE)"; fi)"
+  done
+}
+
+main() {
+  local layer=${1:-}; shift || true
+  [[ $layer == sync ]] && { sync_shims "$@"; return; }
+  [[ $layer == status ]] && { status; return; }
+  [[ -z $layer ]] && { echo "usage: attackframe-box <kali|blackarch> <command> | sync | status" >&2; exit 1; }
+  layer_conf "$layer"
+  local cmd=${1:-}; shift || true
+  case $cmd in
+    setup)    setup "$@" ;;
+    enter|shell)
+      if ((EUID == 0)); then AF_WORKDIR=${AF_WORKDIR:-/root} root_exec bash -l
+      else exists || create; dbx enter "$NAME"; fi ;;
+    run)
+      (($#)) || { main "$LAYER" enter; return; }
+      if ! exists; then
+        have_image || die "the $LAYER box isn't set up yet — run: attackframe-$LAYER setup"
+        create >&2
+      fi
+      if ((EUID == 0)); then root_exec "$@"; exit $?
+      else dbx enter "$NAME" -- "$@"; exit $?; fi ;;
+    install)  (($#)) || die "install what?"; create; install_pkgs "$@"; sync_shims ;;
+    search)
+      if [[ $LAYER == kali ]]; then root_exec bash -c 'apt-get update -qq; apt-cache search "$1"' _ "${1:?term}"
+      else root_exec bash -c 'pacman -Sy >/dev/null; pacman -Ss "$1"' _ "${1:?term}"; fi ;;
+    categories|cats)
+      [[ $LAYER == blackarch ]] || die "categories are a BlackArch thing — try: attackframe-kali search kali-tools-"
+      root_exec bash -c 'pacman -Sy >/dev/null; pacman -Sg' | awk '$1 ~ /^blackarch-/' | sort | uniq -c | sort -rn |
+        awk -v c="$C" -v r="$R" '{ sub("blackarch-","",$2); printf "  %s%-18s%s %5d tools\n", c, $2, r, $1 }' ;;
+    show)     root_exec pacman -Sgq "blackarch-${1#blackarch-}" | column -c "${COLUMNS:-100}" ;;
+    export)   (($#)) || die "export what?"; local b
+              for b; do
+                root_exec sh -c 'command -v "$1" >/dev/null' _ "$b" || { warn "not in $LAYER: $b"; continue; }
+                if write_shim "" "$LAYER" "$b"; then say "$b → $LAYER"; else warn "$b exists natively on the host, not shimmed"; fi
+              done ;;
+    unexport) local b; for b; do drop_shim "$b"; done ;;
+    sync)     sync_shims ;;
+    update)
+      exists || die "the $LAYER box doesn't exist"
+      if [[ $LAYER == kali ]]; then root_exec bash -c 'apt-get update && apt-get -y full-upgrade && apt-get -y autoremove'
+      else root_exec pacman -Syu --noconfirm; fi ;;
+    status)   status ;;
+    remove|rm)
+      exists && dbx rm --force "$NAME"
+      local f; for f in /usr/local/bin/*; do
+        grep -q "^$SHIM_TAG: $LAYER\$" "$f" 2>/dev/null && $SUDO rm -f "$f"
+      done
+      say "removed the $NAME box" ;;
+    ''|-h|--help|help) usage ;;
+    *)        die "unknown command: $cmd (see attackframe-$LAYER help)" ;;
+  esac
+}
+
+main "$@"

@@ -1,0 +1,52 @@
+# AttackFrame BlackArch layer image: Arch Linux + the BlackArch repository
+# (bootstrapped with the official strap.sh). Built by scripts/build-in-container.sh
+# and baked into the ISO's read-only image store; distrobox turns it into the
+# `blackarch` box.
+ARG BASE=docker.io/archlinux/archlinux:latest
+FROM ${BASE}
+
+ARG STRAP_SHA1=""
+ARG GROUPS=""
+COPY packages.txt /tmp/packages.txt
+
+# pacman's download sandbox doesn't work under nested container isolation
+RUN set -eux; \
+    grep -q '^DisableSandbox' /etc/pacman.conf || sed -i '/^\[options\]/a DisableSandbox' /etc/pacman.conf; \
+    sed -i 's/^#\?ParallelDownloads.*/ParallelDownloads = 8/' /etc/pacman.conf; \
+    pacman -Syu --noconfirm --needed curl ca-certificates
+
+# BlackArch repository via the official strap.sh
+RUN set -eux; \
+    curl -fsSL -o /tmp/strap.sh https://blackarch.org/strap.sh; \
+    sum=$(sha1sum /tmp/strap.sh | cut -d' ' -f1); \
+    echo "strap.sh sha1: $sum (compare with https://blackarch.org/downloads.html)"; \
+    if [ -n "${STRAP_SHA1}" ] && [ "$sum" != "${STRAP_SHA1}" ]; then echo "strap.sh checksum mismatch" >&2; exit 1; fi; \
+    bash /tmp/strap.sh </dev/null; rm -f /tmp/strap.sh; \
+    grep -q '^\[blackarch\]' /etc/pacman.conf; \
+    pacman -Syu --noconfirm
+
+# distrobox's own dependencies + build tools (many BlackArch packages build gems/pip deps)
+RUN pacman -S --noconfirm --needed \
+      sudo bash bc curl wget diffutils findutils gnupg inetutils iproute2 iputils keyutils \
+      less lsof man-db ncurses openssh pigz pinentry procps-ng rsync shadow time tree tzdata \
+      unzip util-linux vte-common xorg-xauth zip zsh mesa vulkan-icd-loader base-devel git
+
+# the curated tool set (+ optional BlackArch groups); unknown names are skipped,
+# conflicts fall back to per-package installs
+RUN set -u; \
+    want=""; \
+    for p in ${GROUPS} $(sed 's/#.*//' /tmp/packages.txt); do \
+      if pacman -Si "$p" >/dev/null 2>&1 || pacman -Sg "$p" >/dev/null 2>&1; then want="$want $p"; \
+      else echo "$p" >> /var/log/attackframe-skipped.txt; echo "skip (not in BlackArch/Arch): $p"; fi; \
+    done; \
+    if ! pacman -S --noconfirm --needed $want; then \
+      for g in $want; do \
+        for p in $(pacman -Sgq "$g" 2>/dev/null || echo "$g"); do \
+          pacman -S --noconfirm --needed "$p" >/dev/null 2>&1 || echo "$p" >> /var/log/attackframe-failed.txt; \
+        done; \
+      done; \
+    fi; \
+    yes | pacman -Scc >/dev/null 2>&1; rm -f /tmp/packages.txt; true
+
+LABEL org.opencontainers.image.title="AttackFrame BlackArch layer" \
+      io.attackframe.layer="blackarch"
